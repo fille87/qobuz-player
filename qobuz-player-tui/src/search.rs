@@ -11,7 +11,7 @@ use tui_input::{Input, backend::crossterm::EventHandler};
 
 use crate::{
     app::{Output, PlayOutcome, QueueOutcome, UnfilteredListState},
-    popup::{ArtistPopupState, PlaylistPopupState, Popup},
+    popup::{AlbumPopupState, ArtistPopupState, PlaylistPopupState, Popup},
     ui::{album_table, basic_list_table, render_input, track_table},
 };
 
@@ -230,15 +230,21 @@ impl SearchState {
                         KeyCode::Enter => match self.sub_tab {
                             SubTab::Albums => {
                                 let index = self.albums.state.selected();
+                                let selected = index.and_then(|index| self.albums.items.get(index));
+                                let Some(selected) = selected else {
+                                    return Output::Consumed;
+                                };
+                                let album_tracks =
+                                    match self.client.album_tracks(&selected.id).await {
+                                        Ok(res) => res,
+                                        Err(err) => return Output::Error(format!("{err}")),
+                                    };
 
-                                let id = index
-                                    .and_then(|index| self.albums.items.get(index))
-                                    .map(|album| album.id.clone());
-
-                                if let Some(id) = id {
-                                    return Output::PlayOutcome(PlayOutcome::Album(id));
-                                }
-                                Output::Consumed
+                                Output::Popup(Popup::Album(AlbumPopupState {
+                                    state: Default::default(),
+                                    album_name: selected.title.clone(),
+                                    tracks: album_tracks,
+                                }))
                             }
                             SubTab::Artists => {
                                 let index = self.artists.state.selected();

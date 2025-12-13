@@ -1,4 +1,4 @@
-use qobuz_player_models::AlbumSimple;
+use qobuz_player_models::{AlbumSimple, Track};
 use ratatui::{crossterm::event::KeyCode, prelude::*, widgets::*};
 
 use crate::{
@@ -14,6 +14,13 @@ pub(crate) struct ArtistPopupState {
 }
 
 #[derive(PartialEq)]
+pub(crate) struct AlbumPopupState {
+    pub album_name: String,
+    pub tracks: Vec<Track>,
+    pub state: ListState,
+}
+
+#[derive(PartialEq)]
 pub(crate) struct PlaylistPopupState {
     pub playlist_name: String,
     pub playlist_id: u32,
@@ -23,6 +30,7 @@ pub(crate) struct PlaylistPopupState {
 #[derive(PartialEq)]
 pub(crate) enum Popup {
     Artist(ArtistPopupState),
+    Album(AlbumPopupState),
     Playlist(PlaylistPopupState),
 }
 
@@ -50,6 +58,28 @@ impl Popup {
 
                 frame.render_widget(Clear, area);
                 frame.render_stateful_widget(list, area, &mut artist.state);
+            }
+            Popup::Album(album) => {
+                let area = center(
+                    frame.area(),
+                    Constraint::Percentage(50),
+                    Constraint::Length(album.tracks.len() as u16 + 2),
+                );
+
+                let list: Vec<ListItem> = album
+                    .tracks
+                    .iter()
+                    .map(|track| ListItem::from(Line::from(track.title.clone())))
+                    .collect();
+
+                let list = List::new(list)
+                    .block(block(&album.album_name, false))
+                    .highlight_style(Style::default().bg(Color::Blue))
+                    .highlight_symbol(">")
+                    .highlight_spacing(HighlightSpacing::Always);
+
+                frame.render_widget(Clear, area);
+                frame.render_stateful_widget(list, area, &mut album.state);
             }
             Popup::Playlist(playlist) => {
                 let area = center(frame.area(), Constraint::Length(18), Constraint::Length(3));
@@ -86,6 +116,30 @@ impl Popup {
 
                     if let Some(id) = id {
                         return Some(PlayOutcome::Album(id));
+                    }
+
+                    None
+                }
+                _ => None,
+            },
+            Popup::Album(album_popup_state) => match key {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    album_popup_state.state.select_previous();
+                    None
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    album_popup_state.state.select_next();
+                    None
+                }
+                KeyCode::Enter => {
+                    let index = album_popup_state.state.selected();
+
+                    let id = index
+                        .and_then(|index| album_popup_state.tracks.get(index))
+                        .map(|track| track.id.clone());
+
+                    if let Some(id) = id {
+                        return Some(PlayOutcome::Track(id));
                     }
 
                     None

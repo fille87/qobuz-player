@@ -23,6 +23,7 @@ pub struct Client {
     featured_albums_cache: SimpleCache<Vec<(String, Vec<AlbumSimple>)>>,
     featured_playlists_cache: SimpleCache<Vec<(String, Vec<Playlist>)>>,
     album_cache: Cache<String, Album>,
+    album_tracks_cache: Cache<String, Vec<Track>>,
     artist_cache: Cache<u32, ArtistPage>,
     artist_albums_cache: Cache<u32, Vec<AlbumSimple>>,
     playlist_cache: Cache<u32, Playlist>,
@@ -34,6 +35,10 @@ pub struct Client {
 impl Client {
     pub fn new(username: String, password: String, max_audio_quality: AudioQuality) -> Self {
         let album_cache = moka::future::CacheBuilder::new(1000)
+            .time_to_live(std::time::Duration::from_secs(60 * 60 * 24 * 7))
+            .build();
+
+        let album_tracks_cache = moka::future::CacheBuilder::new(1000)
             .time_to_live(std::time::Duration::from_secs(60 * 60 * 24 * 7))
             .build();
 
@@ -71,6 +76,7 @@ impl Client {
             featured_albums_cache: SimpleCache::new(Duration::days(1)),
             featured_playlists_cache: SimpleCache::new(Duration::days(1)),
             album_cache,
+            album_tracks_cache,
             artist_cache,
             artist_albums_cache,
             playlist_cache,
@@ -233,6 +239,21 @@ impl Client {
         self.artist_albums_cache.insert(id, albums.clone()).await;
 
         Ok(albums)
+    }
+
+    pub async fn album_tracks(&self, id: &str) -> Result<Vec<Track>> {
+        if let Some(cache) = self.album_tracks_cache.get(id).await {
+            return Ok(cache);
+        }
+
+        let client = self.get_client().await?;
+        let tracks = client.album(id).await?.tracks;
+
+        self.album_tracks_cache
+            .insert(id.to_string(), tracks.clone())
+            .await;
+
+        Ok(tracks)
     }
 
     pub async fn add_favorite_track(&self, id: u32) -> Result<()> {
