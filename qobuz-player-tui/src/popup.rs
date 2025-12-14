@@ -110,15 +110,9 @@ impl Popup {
                 KeyCode::Enter => {
                     let index = artist_popup_state.state.selected();
 
-                    let id = index
+                    index
                         .and_then(|index| artist_popup_state.albums.get(index))
-                        .map(|album| album.id.clone());
-
-                    if let Some(id) = id {
-                        return Some(PlayOutcome::Album(id));
-                    }
-
-                    None
+                        .map(|album| PlayOutcome::Album(album.id.clone()))
                 }
                 _ => None,
             },
@@ -134,15 +128,9 @@ impl Popup {
                 KeyCode::Enter => {
                     let index = album_popup_state.state.selected();
 
-                    let id = index
+                    index
                         .and_then(|index| album_popup_state.tracks.get(index))
-                        .map(|track| track.id.clone());
-
-                    if let Some(id) = id {
-                        return Some(PlayOutcome::Track(id));
-                    }
-
-                    None
+                        .map(|track| PlayOutcome::Track(track.id))
                 }
                 _ => None,
             },
