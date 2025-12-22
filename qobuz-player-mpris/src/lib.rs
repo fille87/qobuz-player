@@ -6,8 +6,8 @@ use mpris_server::{
     zbus::{self, fdo},
 };
 use qobuz_player_controls::{
-    PositionReceiver, Result, Status, StatusReceiver, TracklistReceiver, VolumeReceiver,
-    controls::Controls, error::Error,
+    ExitSender, PositionReceiver, Result, Status, StatusReceiver, TracklistReceiver,
+    VolumeReceiver, controls::Controls, error::Error,
 };
 use qobuz_player_models::Track;
 
@@ -17,6 +17,7 @@ struct MprisPlayer {
     tracklist_receiver: TracklistReceiver,
     volume_receiver: VolumeReceiver,
     status_receiver: StatusReceiver,
+    exit_sender: ExitSender,
 }
 
 impl RootInterface for MprisPlayer {
@@ -27,7 +28,10 @@ impl RootInterface for MprisPlayer {
         Err(fdo::Error::NotSupported("Not supported".into()))
     }
     async fn quit(&self) -> fdo::Result<()> {
-        std::process::exit(0);
+        match self.exit_sender.send(true) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(fdo::Error::Failed("Unable to send exit signal".into())),
+        }
     }
     async fn can_quit(&self) -> fdo::Result<bool> {
         Ok(true)
@@ -202,7 +206,10 @@ pub async fn init(
     mut volume_receiver: VolumeReceiver,
     mut status_receiver: StatusReceiver,
     controls: Controls,
+    exit_sender: ExitSender,
 ) -> Result<()> {
+    let mut exit_receiver = exit_sender.subscribe();
+
     let Ok(server) = Server::new(
         "qobuz-player",
         MprisPlayer {
@@ -211,6 +218,7 @@ pub async fn init(
             tracklist_receiver: tracklist_receiver.clone(),
             volume_receiver: volume_receiver.clone(),
             status_receiver: status_receiver.clone(),
+            exit_sender,
         },
     )
     .await
@@ -275,6 +283,11 @@ pub async fn init(
                         return Err(Error::MprisPropertyError { property: "CanPlay, CanPause, PlaybackStatus".into() });
                     };
             },
+            Ok(exit) = exit_receiver.recv() => {
+                if exit {
+                    break Ok(());
+                }
+            }
         }
     }
 }

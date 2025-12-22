@@ -11,6 +11,7 @@ use qobuz_player_controls::{
 };
 use qobuz_player_rfid::RfidState;
 use snafu::prelude::*;
+use tokio::sync::broadcast;
 use tokio_schedule::{Job, every};
 
 #[derive(Parser)]
@@ -28,55 +29,55 @@ struct Cli {
 enum Commands {
     /// Default. Starts the player
     Open {
-        /// Provide a username. (overrides any configured value)
+        /// Provide a username (overrides any configured value)
         #[clap(short, long)]
         username: Option<String>,
 
         #[clap(short, long)]
-        /// Provide a password. (overrides any configured value)
+        /// Provide a password (overrides any configured value)
         password: Option<String>,
 
         #[clap(short, long)]
-        /// Provide max audio quality. (overrides any configured value)
+        /// Provide max audio quality (overrides any configured value)
         max_audio_quality: Option<AudioQuality>,
 
         #[clap(short, long, default_value_t = false)]
-        /// Disable the TUI interface.
+        /// Disable the TUI interface
         disable_tui: bool,
 
         #[cfg(target_os = "linux")]
         #[clap(long, default_value_t = false)]
-        /// Disable the mpris interface.
+        /// Disable the mpris interface
         disable_mpris: bool,
 
         #[clap(short, long, default_value_t = false)]
-        /// Start web server with websocket API and embedded UI.
+        /// Start web server with web api and ui
         web: bool,
 
         #[clap(long)]
-        /// Secret used for web ui auth.
+        /// Secret used for web ui auth
         web_secret: Option<String>,
 
+        #[clap(long, default_value_t = 9888)]
+        /// Specify port for the web server
+        port: u16,
+
         #[clap(long, default_value_t = false)]
-        /// Enable rfid interface.
+        /// Enable rfid interface
         rfid: bool,
 
         #[cfg(feature = "gpio")]
         #[clap(long, default_value_t = false)]
-        /// Enable gpio interface for raspberry pi. Pin 16 (gpio-23) will be high when playing.
+        /// Enable gpio interface for raspberry pi. Pin 16 (gpio-23) will be high when playing
         gpio: bool,
 
-        #[clap(long, default_value_t = 9888)]
-        /// Specify port for the web server.
-        port: u16,
-
         #[clap(long)]
-        /// Cache audio files in directory.
+        /// Cache audio files in directory [default: Temporary directory]
         audio_cache: Option<PathBuf>,
 
-        #[clap(long, default_value_t = false)]
-        /// Do not clean up audio cache
-        no_clean_up_audio_cache: bool,
+        #[clap(long, default_value_t = 1)]
+        /// Clean up audio cache interval in hours. 0 for disable
+        clean_up_audio_cache_interval_hours: u32,
     },
     /// Persist configurations
     Config {
@@ -148,7 +149,7 @@ pub async fn run() -> Result<(), Error> {
         #[cfg(feature = "gpio")]
         gpio: Default::default(),
         audio_cache: Default::default(),
-        no_clean_up_audio_cache: Default::default(),
+        clean_up_audio_cache_interval_hours: Default::default(),
     }) {
         Commands::Open {
             username,
@@ -164,12 +165,14 @@ pub async fn run() -> Result<(), Error> {
             #[cfg(feature = "gpio")]
             gpio,
             audio_cache,
-            no_clean_up_audio_cache,
+            clean_up_audio_cache_interval_hours,
         } => {
             let database_credentials = database.get_credentials().await?;
             let database_configuration = database.get_configuration().await?;
             let tracklist = database.get_tracklist().await.unwrap_or_default();
             let volume = database.get_volume().await.unwrap_or(1.0);
+
+            let (exit_sender, exit_receiver) = broadcast::channel(5);
 
             let audio_cache = audio_cache.unwrap_or_else(|| {
                 let mut cache_dir = std::env::temp_dir();
@@ -219,6 +222,7 @@ pub async fn run() -> Result<(), Error> {
                 let volume_receiver = player.volume();
                 let status_receiver = player.status();
                 let controls = player.controls();
+                let exit_sender = exit_sender.clone();
                 tokio::spawn(async move {
                     if let Err(e) = qobuz_player_mpris::init(
                         position_receiver,
@@ -226,10 +230,11 @@ pub async fn run() -> Result<(), Error> {
                         volume_receiver,
                         status_receiver,
                         controls,
+                        exit_sender,
                     )
                     .await
                     {
-                        exit(!disable_tui && !rfid, e.into());
+                        error_exit(e.into());
                     }
                 });
             }
@@ -259,7 +264,7 @@ pub async fn run() -> Result<(), Error> {
                     )
                     .await
                     {
-                        exit(!disable_tui && !rfid, e.into());
+                        error_exit(e.into());
                     }
                 });
             }
@@ -269,7 +274,7 @@ pub async fn run() -> Result<(), Error> {
                 let status_receiver = player.status();
                 tokio::spawn(async move {
                     if let Err(e) = qobuz_player_gpio::init(status_receiver).await {
-                        exit(!disable_tui && !rfid, e.into());
+                        error_exit(e.into());
                     }
                 });
             }
@@ -288,7 +293,7 @@ pub async fn run() -> Result<(), Error> {
                     )
                     .await
                     {
-                        exit(!disable_tui && !rfid, e.into());
+                        error_exit(e.into());
                     }
                 });
             } else if !disable_tui {
@@ -306,20 +311,23 @@ pub async fn run() -> Result<(), Error> {
                         position_receiver,
                         tracklist_receiver,
                         status_receiver,
+                        exit_sender,
                     )
                     .await
                     {
-                        exit(!disable_tui && !rfid, e.into());
+                        error_exit(e.into());
                     };
                 });
             };
 
-            if !no_clean_up_audio_cache {
+            if clean_up_audio_cache_interval_hours != 0 {
                 let clean_up_schedule = every(1).hour().perform(move || {
                     let database = database.clone();
                     async move {
                         if let Ok(deleted_paths) = database
-                            .clean_up_cache_entries(time::Duration::hours(1))
+                            .clean_up_cache_entries(time::Duration::hours(
+                                clean_up_audio_cache_interval_hours.into(),
+                            ))
                             .await
                         {
                             for path in deleted_paths {
@@ -332,7 +340,7 @@ pub async fn run() -> Result<(), Error> {
                 tokio::spawn(clean_up_schedule);
             }
 
-            player.player_loop().await?;
+            player.player_loop(exit_receiver).await?;
             Ok(())
         }
         Commands::Config { command } => match command {
@@ -369,11 +377,7 @@ pub async fn run() -> Result<(), Error> {
     }
 }
 
-fn exit(cli: bool, error: Error) {
-    if cli {
-        ratatui::restore();
-    }
-
+fn error_exit(error: Error) {
     eprintln!("{error}");
     std::process::exit(1);
 }

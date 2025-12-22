@@ -6,7 +6,8 @@ use tokio::{
 };
 
 use crate::{
-    PositionReceiver, Result, Status, StatusReceiver, TracklistReceiver, VolumeReceiver,
+    ExitReceiver, PositionReceiver, Result, Status, StatusReceiver, TracklistReceiver,
+    VolumeReceiver,
     controls::{ControlCommand, Controls},
     database::Database,
     notification::NotificationBroadcast,
@@ -242,7 +243,6 @@ impl Player {
         Ok(())
     }
 
-    /// Skip to a specific track in the tracklist.
     async fn skip_to_position(&mut self, new_position: i32, force: bool) -> Result<()> {
         let mut tracklist = self.tracklist_rx.borrow().clone();
         let current_position = tracklist.current_position();
@@ -362,7 +362,7 @@ impl Player {
     async fn play_top_tracks(&mut self, artist_id: u32, index: usize) -> Result<()> {
         let artist = self.client.artist_page(artist_id).await?;
         let tracks = artist.top_tracks;
-        let unstreambale_tracks_to_index =
+        let unstreamable_tracks_to_index =
             tracks.iter().take(index).filter(|t| !t.available).count() as i32;
 
         let mut tracklist = Tracklist {
@@ -374,14 +374,14 @@ impl Player {
             }),
         };
 
-        tracklist.skip_to_track(index as i32 - unstreambale_tracks_to_index);
+        tracklist.skip_to_track(index as i32 - unstreamable_tracks_to_index);
         self.new_queue(tracklist).await
     }
 
     async fn play_playlist(&mut self, playlist_id: u32, index: usize, shuffle: bool) -> Result<()> {
         let playlist = self.client.playlist(playlist_id).await?;
 
-        let unstreambale_tracks_to_index = playlist
+        let unstreamable_tracks_to_index = playlist
             .tracks
             .iter()
             .take(index)
@@ -407,7 +407,7 @@ impl Player {
             }),
         };
 
-        tracklist.skip_to_track(index as i32 - unstreambale_tracks_to_index);
+        tracklist.skip_to_track(index as i32 - unstreamable_tracks_to_index);
         self.new_queue(tracklist).await
     }
 
@@ -581,7 +581,7 @@ impl Player {
         Ok(())
     }
 
-    pub async fn player_loop(&mut self) -> Result<()> {
+    pub async fn player_loop(&mut self, mut exit_receiver: ExitReceiver) -> Result<()> {
         let mut interval = tokio::time::interval(Duration::from_millis(INTERVAL_MS));
 
         loop {
@@ -604,6 +604,11 @@ impl Player {
                         self.position_timer.reset();
                         self.start_timer();
                         self.set_target_status(Status::Playing);
+                    }
+                }
+                Ok(exit) = exit_receiver.recv() => {
+                    if exit {
+                        break Ok(());
                     }
                 }
             }
