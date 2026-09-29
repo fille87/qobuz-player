@@ -39,6 +39,8 @@ num-traits.workspace = true
 
 # binary dependencies
 clap.workspace = true
+dirs.workspace = true
+toml = "1.1.6"
 
 [target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
 keepawake = { workspace = true }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use app::{App, create_now_playing_state};
 use controls_module::{
@@ -8,7 +8,7 @@ use controls_module::{
 use disconnect_module::DisconnectClientConfig;
 use favorites::FavoritesState;
 use player_module::{
-    AppResult, client::StreamClient, database::Database, error::PlayerError,
+    AppResult, client::StreamClient, config::Config, database::Database, error::PlayerError,
     notification::NotificationBroadcast,
 };
 use queue::QueueState;
@@ -38,6 +38,8 @@ mod ui;
 mod widgets;
 
 pub async fn init(
+    config_path: PathBuf,
+    configuration: Config,
     client: Arc<StreamClient>,
     broadcast: Arc<NotificationBroadcast>,
     controls: Controls,
@@ -69,7 +71,6 @@ pub async fn init(
         .collect();
     let now_playing = create_now_playing_state(&tracklist_value, status_value);
 
-    let initial_configuration = database.get_configuration().await?;
     let favorites = FavoritesState::new(&client).await?;
     let favorite_ids = build_favorite_ids(&favorites);
 
@@ -99,7 +100,8 @@ pub async fn init(
         preferences: preferences::PreferencesState::new(
             exit_sender.clone(),
             audio_cache_ttl_sender,
-            initial_configuration,
+            configuration,
+            config_path,
         ),
         client,
         image_cache,

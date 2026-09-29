@@ -13,9 +13,9 @@ pub struct SharedArgs {
     /// Directory where cached audio is stored. Defaults to the system temporary directory.
     pub audio_cache: Option<PathBuf>,
 
-    #[clap(long, default_value_t = 1)]
+    #[clap(long)]
     /// Time-to-live for cached audio, in hours.
-    pub audio_cache_time_to_live: u32,
+    pub audio_cache_time_to_live: Option<u32>,
 
     #[clap(short, long)]
     /// Provide max audio quality (overrides any configured value)
@@ -28,8 +28,12 @@ pub struct SharedArgs {
 
     /// Use the file based streaming endpoint instead endpoint from web player
     /// Less CPU intense
-    #[clap(long, default_value_t = false)]
-    pub file_based_streaming: bool,
+    #[clap(long)]
+    pub file_based_streaming: Option<bool>,
+
+    /// Path to a configuration file
+    #[clap(short, long)]
+    pub config: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -141,12 +145,6 @@ pub enum SharedCommands {
 
     /// Logout from Qobuz
     Logout,
-
-    /// Persistently set the maximum audio quality
-    SetMaxAudioQuality {
-        #[clap(value_enum)]
-        quality: AudioQuality,
-    },
 }
 
 pub async fn handle_shared_commands(command: SharedCommands, database: &Database) -> AppResult<()> {
@@ -162,12 +160,6 @@ pub async fn handle_shared_commands(command: SharedCommands, database: &Database
         SharedCommands::Logout => {
             database.clear_user_auth_token().await?;
             println!("Logout successful!");
-            Ok(())
-        }
-        SharedCommands::SetMaxAudioQuality { quality } => {
-            database.set_max_audio_quality(quality).await?;
-
-            println!("Max audio quality saved.");
             Ok(())
         }
     }
@@ -216,6 +208,7 @@ pub fn spawn_clean_up(database: Arc<Database>, audio_cache_time_to_live: u32) {
     }
 }
 
+// TODO: Update this to use the config file instead
 pub fn spawn_clean_up_mut(
     database: Arc<Database>,
     initial_ttl: Option<u32>,

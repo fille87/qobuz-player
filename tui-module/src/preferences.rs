@@ -1,10 +1,9 @@
+use std::path::{Path, PathBuf};
+
 use controls_module::{ExitSender, controls::Controls};
 use crossterm::event::KeyModifiers;
 use disconnect_module::DisconnectClientConfig;
-use player_module::{
-    AudioQuality,
-    database::{Configuration, Database},
-};
+use player_module::{AudioQuality, config::Config, database::Database, notification};
 use ratatui::{
     crossterm::event::{Event, KeyCode, KeyEventKind},
     prelude::*,
@@ -83,9 +82,11 @@ enum PreferenceFocus {
 }
 
 pub struct PreferencesState {
-    exit_sender: ExitSender,
+    config_path: PathBuf,
+    configuration: Config,
+
     audio_cache_ttl_sender: mpsc::UnboundedSender<u32>,
-    configuration: Configuration,
+    exit_sender: ExitSender,
 
     tab: PreferencesTab,
     pane: PreferencesPane,
@@ -109,7 +110,8 @@ impl PreferencesState {
     pub fn new(
         exit_sender: ExitSender,
         audio_cache_ttl_sender: mpsc::UnboundedSender<u32>,
-        configuration: Configuration,
+        configuration: Config,
+        config_path: PathBuf,
     ) -> Self {
         let cache_path_value = configuration.cache_directory.to_string_lossy().to_string();
         let cache_ttl_value = configuration.cache_ttl_hours.to_string();
@@ -143,6 +145,7 @@ impl PreferencesState {
         };
 
         Self {
+            config_path,
             exit_sender,
             audio_cache_ttl_sender,
             configuration,
@@ -765,15 +768,24 @@ impl PreferencesState {
         self.configuration.disconnect_password = trimmed_optional_value(&self.disconnect_password);
         self.configuration.device_name = trimmed_optional_value(&self.disconnect_device_name);
 
+        // TODO: Remove once the database is no longer used for disconnect
         if let Some(config) = disconnect_config {
             let _ = database
                 .set_disconnect_config(&config.server_url, &config.password, &config.device_name)
                 .await;
-
             let _ = database.set_disconnect_enabled(true).await;
         } else {
             let _ = database.set_disconnect_enabled(false).await;
         }
+
+        let Ok(cfg_string) = toml::to_string(&self.configuration) else {
+            // TODO: Show an error notification
+            todo!()
+        };
+        let Ok(_cfg_file) = std::fs::write(&self.config_path, cfg_string) else {
+            // TODO: Show an error notification
+            todo!()
+        };
     }
 
     fn parse_cache_ttl(&self) -> u32 {

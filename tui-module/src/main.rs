@@ -1,20 +1,23 @@
 #[cfg(feature = "connect")]
 use cli_module::ConnectArgs;
 use cli_module::{
-    SharedArgs, SharedCommands, create_player, default_audio_quality, get_client,
-    handle_shared_commands, spawn_clean_up_mut,
+    SharedArgs, SharedCommands, create_player, get_client, handle_shared_commands,
+    spawn_clean_up_mut,
 };
 use disconnect_module::{DisconnectClientConfig, spawn_disconnect};
 use futures::executor::block_on;
 #[cfg(target_os = "linux")]
 use mpris_module::spawn_mpris;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use clap::Parser;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 use controls_module::StatusReceiver;
-use player_module::{AppResult, database::Database, notification::NotificationBroadcast};
+use player_module::{
+    AppResult, config::Config, database::Database, error::PlayerError,
+    notification::NotificationBroadcast,
+};
 
 #[derive(Parser)]
 #[clap(author, about, long_about = None)]
@@ -57,7 +60,18 @@ pub async fn run() -> AppResult<()> {
     let args = Arguments::parse();
     let database = Arc::new(Database::new().await?);
     let headless = false;
-    let configuration = database.get_configuration().await?;
+    let cfg_path = match args.shared.config {
+        Some(args_path) => Some(PathBuf::from(args_path)),
+        None => dirs::config_dir().map(|mut path| {
+            path.push("qobine");
+            path.push("config.toml");
+            path
+        }),
+    }
+    .ok_or_else(|| PlayerError::ConfigError {
+        message: String::from("couldn't get a path to system config directory"),
+    })?;
+    let configuration = Config::read_from_file(&cfg_path)?;
 
     if let Some(command) = args.command {
         handle_shared_commands(command, &database).await?;
@@ -66,11 +80,16 @@ pub async fn run() -> AppResult<()> {
 
     let (exit_sender, exit_receiver) = broadcast::channel(5);
 
-    let max_audio_quality = default_audio_quality(&database, args.shared.max_audio_quality).await?;
+    let max_audio_quality = args
+        .shared
+        .max_audio_quality
+        .unwrap_or(configuration.max_audio_quality);
     let client = get_client(
         &database,
         max_audio_quality,
-        args.shared.file_based_streaming,
+        args.shared
+            .file_based_streaming
+            .unwrap_or(configuration.use_file_based_streaming),
         headless,
     )
     .await?;
@@ -79,13 +98,17 @@ pub async fn run() -> AppResult<()> {
     let broadcast = Arc::new(NotificationBroadcast::new());
 
     let mut player = create_player(
-        args.shared.audio_cache,
+        args.shared
+            .audio_cache
+            .or(Some(configuration.cache_directory.clone())), // TODO: Update to no longer take option
         database.clone(),
         client.clone(),
         broadcast.clone(),
         None,
         None,
-        args.shared.output_device_id,
+        args.shared
+            .output_device_id
+            .or(configuration.device_name.clone()), // TODO: Does this need to take ownership?
     )
     .await?;
 
@@ -151,14 +174,14 @@ pub async fn run() -> AppResult<()> {
     );
 
     let disconnect_client_config = if configuration.enable_disconnect
-        && let Some(server_url) = configuration.disconnect_server_url
-        && let Some(password) = configuration.disconnect_password
-        && let Some(device_name) = configuration.device_name
+        && let Some(ref server_url) = configuration.disconnect_server_url
+        && let Some(ref password) = configuration.disconnect_password
+        && let Some(ref device_name) = configuration.device_name
     {
         Some(DisconnectClientConfig {
-            server_url,
-            password,
-            device_name,
+            server_url: server_url.to_string(),
+            password: password.to_string(),
+            device_name: device_name.to_string(),
         })
     } else {
         None
@@ -181,6 +204,8 @@ pub async fn run() -> AppResult<()> {
 
     tokio::spawn(async move {
         if let Err(err) = tui_module::init(
+            cfg_path,
+            configuration,
             client,
             broadcast,
             controls,

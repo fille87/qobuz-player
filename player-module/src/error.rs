@@ -53,6 +53,10 @@ pub enum PlayerError {
     DatabaseSerializationError {
         message: String,
     },
+    #[snafu(display("Unable to read configuration file: {message}"))]
+    ConfigError {
+        message: String,
+    },
     #[snafu(display("Serialization error: {source}"))]
     SerializationError {
         #[snafu(source)]
