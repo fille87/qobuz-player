@@ -341,7 +341,7 @@ impl GenresState {
     ) -> AppResult<Output> {
         match self.focus {
             Pane::Sidebar => match code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => {
                     self.mode = GenresMode::GenreList;
 
                     Ok(Output::Consumed)

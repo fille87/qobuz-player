@@ -309,7 +309,7 @@ impl AlbumOverlay {
                 Ok(Output::Consumed)
             }
 
-            KeyCode::Esc => Ok(Output::PopOverlay),
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => Ok(Output::PopOverlay),
 
             _ => Ok(Output::NotConsumed),
         }

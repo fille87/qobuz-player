@@ -81,7 +81,7 @@ impl TrackInfoOverlay {
                 self.open_artist(client).await
             }
 
-            KeyCode::Esc => Ok(Output::PopOverlay),
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => Ok(Output::PopOverlay),
 
             _ => Ok(Output::NotConsumed),
         }

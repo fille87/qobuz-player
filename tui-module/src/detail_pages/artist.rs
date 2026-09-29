@@ -287,7 +287,7 @@ impl ArtistOverlay {
                 Output::Consumed
             }
 
-            KeyCode::Esc => Output::PopOverlay,
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => Output::PopOverlay,
 
             _ => Output::NotConsumed,
         }
